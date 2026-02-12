@@ -3,6 +3,8 @@ import polars as pl
 import numpy as np
 from adbc_driver_postgresql import dbapi
 
+
+
 ## load vessel finder feed data
 username = os.getenv("DB_APP_USER")
 password = os.getenv("DB_APP_PW")
