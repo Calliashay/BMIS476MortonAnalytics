@@ -133,6 +133,7 @@ terminal_data = pl.read_database_uri(
 
 windowed_joined = windowed_data_complete.join(terminal_data, on = 'terminal_id', how = "left")
 
+
 ## event labels
 
 event_labeled_data = windowed_joined.with_columns(
