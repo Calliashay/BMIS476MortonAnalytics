@@ -2,7 +2,7 @@ import pandas as pd
 
 def load_dataset(file_path):
     try:
-        df = pd.read_excel(file_path)
+        df = pd.read_csv(file_path)
         print("Dataset loaded successfully!\n")
         print("First 3 rows:")
         print(df.head())
