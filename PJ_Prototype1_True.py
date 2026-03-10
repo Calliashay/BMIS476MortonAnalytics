@@ -63,7 +63,8 @@ USAGE:
 # Before running this program, you need to install the libraries it depends on.
 # Open a terminal in this project folder and run the command below ONE TIME:
 #
-## (Paste this into the terminal by opening a terminal or clicking the play button)
+## (Paste this into the terminal by opening a terminal) 
+## How to open a terminal: ctrl
 #   pip install pandas numpy anthropic pyais
 #
 # What each package does:
@@ -99,7 +100,7 @@ from typing import Optional, Tuple
 # ── Third-party imports ───────────────────────────────────────────────────────
 import pandas as pd
 import numpy as np
-import anthropic
+import anthropic 
 from pyais import decode
 
 # Suppress pandas performance warnings for large frame operations
@@ -208,6 +209,7 @@ def import_dataset(preview_rows: int = 10,
 
     filepath = filedialog.askopenfilename(
         title="Select your AIS Dataset",
+        initialdir="C:/Users/matth/BMIS_Projects_2026",
         filetypes=[
             ("All supported files", "*.csv *.json *.nmea *.txt *.ais"),
             ("CSV files",           "*.csv"),
@@ -1346,7 +1348,7 @@ def run_pipeline(input_path: str,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description=(
-            "DDT � GEN AI AIS Event Detection & Labeling System"
+            "DDT -- GEN AI AIS Event Detection & Labeling System"
         
             "Detects ARRIVAL, DEPARTURE, ANCHORING, ROUTE_DEVIATION, "
             "and PROXIMITY events from AIS vessel tracking data."
@@ -1377,6 +1379,7 @@ if __name__ == "__main__":
         help=(
             "Generate natural-language AI summaries for each event (Req #9)."
             "Requires: ANTHROPIC_API_KEY environment variable to be set."
+
             "Example: export ANTHROPIC_API_KEY=sk-ant-..."
         )
     )
