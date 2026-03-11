@@ -413,11 +413,12 @@ def run_pipeline_from_df(df: pd.DataFrame,
     print_section("EXPORTING OUTPUTS  (Req #6, #8)")
     os.makedirs(output_dir, exist_ok=True)
 
-    labeled_path = os.path.join(output_dir, "labeled_output.csv")
+    file_prefix = date_label if date_label != "all" else "full_dataset"
+    labeled_path = os.path.join(output_dir, file_prefix + "_labeled.csv")
     export_csv(labeled_df, labeled_path, label="Full labeled dataset")
 
     if events_df is not None and not events_df.empty:
-        events_path = os.path.join(output_dir, "events_summary.csv")
+        events_path = os.path.join(output_dir, file_prefix + "_events_summary.csv")
         export_csv(events_df, events_path, label="Events summary")
 
     # Summary
