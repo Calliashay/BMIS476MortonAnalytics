@@ -913,31 +913,47 @@ def _detect_speed_events(df: pd.DataFrame, cols: dict) -> list:
     anchoring_mask = df["_rolling_min_sog"].notna() & (df["_rolling_min_sog"] <= anc_max)
 
     # ── Build event records from masked rows ─────────────────────────────────
-    # We iterate over the (small) matched subset, not the full 8M rows
     for event_type, mask in [
         ("ARRIVAL",   arrival_mask),
         ("DEPARTURE", departure_mask),
         ("ANCHORING", anchoring_mask),
     ]:
-        matched = df[mask][[col_mmsi, col_lat, col_lon, col_time, col_sog,
-                              *([ col_name] if col_name else [])]].copy()
+        cols_needed = [col_mmsi, col_lat, col_lon, col_time, col_sog]
+        if col_name:
+            cols_needed.append(col_name)
+        matched = df[mask][cols_needed].copy()
+        n_matched = len(matched)
 
-        for _, row in matched.iterrows():
-            sog_val = row[col_sog]
+        # Extract as numpy arrays — avoids slow iterrows() on large matched sets
+        mmsi_arr = matched[col_mmsi].to_numpy()
+        lat_arr  = matched[col_lat].to_numpy()
+        lon_arr  = matched[col_lon].to_numpy()
+        time_arr = matched[col_time].to_numpy()
+        sog_arr  = matched[col_sog].to_numpy()
+        name_arr = matched[col_name].to_numpy() if col_name else None
+
+        # Vectorized null-flag computation across all matched rows at once
+        null_check_cols = [col_lat, col_lon, col_time, col_sog]
+        null_matrix = pd.isna(matched[null_check_cols]).to_numpy()
+
+        for k in range(n_matched):
+            sog_raw = sog_arr[k]
+            sog_val = float(sog_raw) if not pd.isna(sog_raw) else None
+            nulls   = [c for c, bad in zip(null_check_cols, null_matrix[k]) if bad]
             events.append({
                 "event_id":         make_event_id(),
-                "vessel_id":        row[col_mmsi],
-                "vessel_name":      row[col_name] if col_name and col_name in row else str(row[col_mmsi]),
+                "vessel_id":        mmsi_arr[k],
+                "vessel_name":      (name_arr[k] if col_name and not pd.isna(name_arr[k])
+                                     else str(mmsi_arr[k])),
                 "event_type":       event_type,
-                "timestamp":        row[col_time],
-                "latitude":         row[col_lat],
-                "longitude":        row[col_lon],
+                "timestamp":        time_arr[k],
+                "latitude":         float(lat_arr[k]),
+                "longitude":        float(lon_arr[k]),
                 "confidence_score": confidence_score(event_type, sog_val),
-                # Flag any NULL values in this row's key fields (Req #3)
-                "null_flags":       null_flags(row, [col_lat, col_lon, col_time, col_sog]),
+                "null_flags":       ", ".join(nulls) if nulls else "None",
             })
 
-        print(f"         {event_type:<20} → {len(matched):,} events detected")
+        print(f"         {event_type:<20} → {n_matched:,} events detected")
 
     # Clean up temporary columns
     df.drop(columns=["_prev_sog", "_rolling_min_sog"], inplace=True, errors="ignore")
@@ -980,21 +996,43 @@ def _detect_route_deviations(df: pd.DataFrame, cols: dict) -> list:
 
     matched = df[deviation_mask]
 
-    for _, row in matched.iterrows():
-        sog_val = row[col_sog] if col_sog and col_sog in row else None
+    # Extract matched rows as arrays — avoids slow iterrows() over large deviation sets
+    dev_cols = [col_mmsi, col_lat, col_lon, col_time, col_cog]
+    if col_sog:
+        dev_cols.append(col_sog)
+    if col_name:
+        dev_cols.append(col_name)
+    matched_sub = matched[dev_cols]
+    n_dev = len(matched_sub)
+
+    mmsi_arr = matched_sub[col_mmsi].to_numpy()
+    lat_arr  = matched_sub[col_lat].to_numpy()
+    lon_arr  = matched_sub[col_lon].to_numpy()
+    time_arr = matched_sub[col_time].to_numpy()
+    sog_arr  = matched_sub[col_sog].to_numpy() if col_sog else None
+    name_arr = matched_sub[col_name].to_numpy() if col_name else None
+
+    null_check_cols = [col_lat, col_lon, col_time, col_cog]
+    null_matrix = pd.isna(matched_sub[null_check_cols]).to_numpy()
+
+    for k in range(n_dev):
+        sog_raw = sog_arr[k] if sog_arr is not None else None
+        sog_val = float(sog_raw) if sog_raw is not None and not pd.isna(sog_raw) else None
+        nulls   = [c for c, bad in zip(null_check_cols, null_matrix[k]) if bad]
         events.append({
             "event_id":         make_event_id(),
-            "vessel_id":        row[col_mmsi],
-            "vessel_name":      row[col_name] if col_name and col_name in row else str(row[col_mmsi]),
+            "vessel_id":        mmsi_arr[k],
+            "vessel_name":      (name_arr[k] if col_name and not pd.isna(name_arr[k])
+                                 else str(mmsi_arr[k])),
             "event_type":       "ROUTE_DEVIATION",
-            "timestamp":        row[col_time],
-            "latitude":         row[col_lat],
-            "longitude":        row[col_lon],
+            "timestamp":        time_arr[k],
+            "latitude":         float(lat_arr[k]),
+            "longitude":        float(lon_arr[k]),
             "confidence_score": confidence_score("ROUTE_DEVIATION", sog_val),
-            "null_flags":       null_flags(row, [col_lat, col_lon, col_time, col_cog]),
+            "null_flags":       ", ".join(nulls) if nulls else "None",
         })
 
-    print(f"         {'ROUTE_DEVIATION':<20} → {len(events):,} events detected")
+    print(f"         {'ROUTE_DEVIATION':<20} → {n_dev:,} events detected")
 
     # Clean up temporary columns
     df.drop(columns=["_prev_cog", "_bearing_change"], inplace=True, errors="ignore")
@@ -1047,41 +1085,51 @@ def _detect_proximity(df: pd.DataFrame, cols: dict) -> list:
             continue
 
         vessels = group.reset_index(drop=True)
-        n = len(vessels)
 
-        # Pairwise comparison within this time bucket
-        for i in range(n):
-            for j in range(i + 1, n):
-                r1 = vessels.iloc[i]
-                r2 = vessels.iloc[j]
+        lats   = vessels[col_lat].to_numpy(dtype="float64")
+        lons   = vessels[col_lon].to_numpy(dtype="float64")
+        mmsi_v = vessels[col_mmsi].to_numpy()
 
-                # Skip same vessel (shouldn't happen after groupby, but be safe)
-                if r1[col_mmsi] == r2[col_mmsi]:
-                    continue
+        # Drop rows with invalid coordinates
+        valid  = ~(np.isnan(lats) | np.isnan(lons))
+        lats   = lats[valid]
+        lons   = lons[valid]
+        mmsi_v = mmsi_v[valid]
+        n_v    = len(lats)
+        if n_v < 2:
+            continue
 
-                # Skip rows with invalid coordinates
-                if any(pd.isna([r1[col_lat], r1[col_lon], r2[col_lat], r2[col_lon]])):
-                    continue
+        # Vectorized pairwise haversine via numpy broadcasting.
+        # Replaces the O(n²) Python loop — for 100 vessels this is ~100x faster.
+        # Memory: n×n float64 matrix ≈ 8 KB per vessel² (fine up to ~5000 vessels/bucket).
+        R       = 3440.065
+        phi1    = np.radians(lats[:, None])
+        phi2    = np.radians(lats[None, :])
+        dphi    = np.radians(lats[None, :] - lats[:, None])
+        dlambda = np.radians(lons[None, :] - lons[:, None])
+        a       = (np.sin(dphi / 2) ** 2
+                   + np.cos(phi1) * np.cos(phi2) * np.sin(dlambda / 2) ** 2)
+        dists   = R * 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
 
-                dist = haversine_nm(r1[col_lat], r1[col_lon], r2[col_lat], r2[col_lon])
+        # Get upper-triangle pairs within proximity threshold (each pair once)
+        i_idx, j_idx = np.where(np.triu(dists <= prox_nm, k=1))
 
-                if dist <= prox_nm:
-                    # Midpoint location for the event record
-                    mid_lat = (r1[col_lat] + r2[col_lat]) / 2
-                    mid_lon = (r1[col_lon] + r2[col_lon]) / 2
-
-                    events.append({
-                        "event_id":         make_event_id(),
-                        # Record both MMSIs so the event is traceable to both vessels
-                        "vessel_id":        f"{r1[col_mmsi]} & {r2[col_mmsi]}",
-                        "vessel_name":      "PROXIMITY PAIR",
-                        "event_type":       "PROXIMITY",
-                        "timestamp":        ts_bucket,
-                        "latitude":         mid_lat,
-                        "longitude":        mid_lon,
-                        "confidence_score": confidence_score("PROXIMITY"),
-                        "null_flags":       "None",
-                    })
+        for i, j in zip(i_idx, j_idx):
+            if mmsi_v[i] == mmsi_v[j]:
+                continue
+            mid_lat = (lats[i] + lats[j]) / 2
+            mid_lon = (lons[i] + lons[j]) / 2
+            events.append({
+                "event_id":         make_event_id(),
+                "vessel_id":        f"{mmsi_v[i]} & {mmsi_v[j]}",
+                "vessel_name":      "PROXIMITY PAIR",
+                "event_type":       "PROXIMITY",
+                "timestamp":        ts_bucket,
+                "latitude":         mid_lat,
+                "longitude":        mid_lon,
+                "confidence_score": confidence_score("PROXIMITY"),
+                "null_flags":       "None",
+            })
 
     print(f"\n         {'PROXIMITY':<20} → {len(events):,} events detected")
 
@@ -1243,67 +1291,52 @@ def build_labeled_dataset(original_df: pd.DataFrame,
 
     events_df = events_df.copy()
 
-    # Normalize vessel_id to string for consistent key matching
-    events_df["_key_mmsi"] = events_df["vessel_id"].astype(str)
-    events_df["_key_ts"]   = (pd.to_datetime(events_df["timestamp"], errors="coerce")
-                               .dt.floor("min").astype(str))
+    # Add timestamp-minute key
+    events_df["_key_ts"] = (pd.to_datetime(events_df["timestamp"], errors="coerce")
+                             .dt.floor("min").astype(str))
 
-    # Build the lookup — if multiple events match the same key, keep first
-    # PROXIMITY events store both MMSIs as "A & B"; split them so both vessels get tagged
-    lookup = {}
-    for _, ev in events_df.iterrows():
-        ev_data = {
-            "event_id":         ev["event_id"],
-            "event_type":       ev["event_type"],
-            "confidence_score": ev["confidence_score"],
-            "null_flags":       ev["null_flags"],
-            "ai_summary":       ev.get("ai_summary", None),
-        }
-        mmsi_keys = [m.strip() for m in ev["_key_mmsi"].split(" & ")]
-        for mmsi_key in mmsi_keys:
-            key = (mmsi_key, ev["_key_ts"])
-            if key not in lookup:
-                lookup[key] = ev_data
+    # Expand PROXIMITY events (stored as "MMSI_A & MMSI_B") into two rows so
+    # both vessels get tagged — done vectorially instead of row-by-row
+    prox_mask = events_df["vessel_id"].astype(str).str.contains(" & ", na=False)
+    non_prox  = events_df[~prox_mask].copy()
+    non_prox["_key_mmsi"] = non_prox["vessel_id"].astype(str)
 
-    print(f"[OUTPUT] Lookup index built — {len(lookup):,} unique event keys.")
+    if prox_mask.any():
+        prox_a = events_df[prox_mask].copy()
+        prox_a["_key_mmsi"] = (prox_a["vessel_id"].astype(str)
+                                .str.split(" & ").str[0].str.strip())
+        prox_b = events_df[prox_mask].copy()
+        prox_b["_key_mmsi"] = (prox_b["vessel_id"].astype(str)
+                                .str.split(" & ").str[1].str.strip())
+        events_expanded = pd.concat([non_prox, prox_a, prox_b], ignore_index=True)
+    else:
+        events_expanded = non_prox
 
-    # ── Tag original DataFrame rows ───────────────────────────────────────────
-    # Create temporary key columns for fast vectorized matching
+    # Keep first event per (mmsi, ts-minute) key — mirrors original "first wins" logic
+    events_expanded = events_expanded.drop_duplicates(
+        subset=["_key_mmsi", "_key_ts"], keep="first"
+    )
+
+    merge_cols = ["event_id", "event_type", "confidence_score", "null_flags"]
+    if "ai_summary" in events_expanded.columns:
+        merge_cols.append("ai_summary")
+
+    print(f"[OUTPUT] Lookup index built — {len(events_expanded):,} unique event keys.")
+
+    # ── Tag original DataFrame rows via merge (replaces 7M+ row Python loop) ──
     original_df["_key_mmsi"] = original_df[col_mmsi].astype(str)
     original_df["_key_ts"]   = (pd.to_datetime(original_df[col_time], errors="coerce")
                                  .dt.floor("min").astype(str))
 
-    # Map each row to its event data using the lookup
-    # Using list comprehension is faster than apply() for large DataFrames
-    print("[OUTPUT] Tagging rows with event labels (this may take a moment for 8M rows)...")
+    print("[OUTPUT] Tagging rows with event labels...")
+    original_df = original_df.merge(
+        events_expanded[["_key_mmsi", "_key_ts"] + merge_cols],
+        on=["_key_mmsi", "_key_ts"],
+        how="left",
+    )
 
-    event_ids    = []
-    event_types  = []
-    conf_scores  = []
-    null_flag_col = []
-    ai_summaries = []
-
-    for mmsi_key, ts_key in zip(original_df["_key_mmsi"], original_df["_key_ts"]):
-        ev = lookup.get((mmsi_key, ts_key))
-        if ev:
-            event_ids.append(ev["event_id"])
-            event_types.append(ev["event_type"])
-            conf_scores.append(ev["confidence_score"])
-            null_flag_col.append(ev["null_flags"])
-            ai_summaries.append(ev["ai_summary"])
-        else:
-            event_ids.append(None)
-            event_types.append(None)
-            conf_scores.append(None)
-            null_flag_col.append(None)
-            ai_summaries.append(None)
-
-    # Assign new columns to the DataFrame (Req #6)
-    original_df["event_id"]         = event_ids
-    original_df["event_type"]       = event_types
-    original_df["confidence_score"] = conf_scores
-    original_df["null_flags"]       = null_flag_col
-    original_df["ai_summary"]       = ai_summaries
+    if "ai_summary" not in original_df.columns:
+        original_df["ai_summary"] = None
 
     # Remove temporary key columns before export
     original_df.drop(columns=["_key_mmsi", "_key_ts"], inplace=True, errors="ignore")
