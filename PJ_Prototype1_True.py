@@ -234,10 +234,7 @@ MARITIME_REGIONS = [
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Section 1B  DATA IMPORT FUNCTION  — Paste this after the CONFIG block
-# Allows importing large datasets (850K+ rows) from your local computer.
-# The full dataset is held ONLY in memory (never written to disk in your
-# project folder), and a small preview CSV is saved for reference.
-# This keeps your GitHub repo clean and avoids large file push errors.
+# Allows importing large datasets (850K+ rows) from your local computer..
 # ──────────────────────────────────────────────────────────────────────────────
 
 import tkinter as tk
@@ -250,25 +247,7 @@ def import_dataset(preview_rows: int = 10,
     Opens a file browser dialog so you can select your AIS dataset directly
     from your computer. The full dataset is loaded into memory but is NOT
     saved into your project folder. The folder will be too large if it exports the dataset with 
-    the function. You can easily change this if needed. 
-
-    A small preview CSV (default: 10 rows) is optionally saved so you have
-    a reference sample to inspect or commit.
-
-    Supports: .csv, .json, .nmea, .txt, .ais
-
-    Args:
-        preview_rows : Number of rows to save in the preview file (default 10)
-        save_preview : Whether to save the preview CSV (default True)
-        preview_dir  : Where to save the preview file (default ./preview)
-
-    Returns:
-        pd.DataFrame : Full dataset loaded in memory, ready for the pipeline
-
-    Usage:
-        df = import_dataset()               # Opens file browser
-        df = import_dataset(preview_rows=5) # Save only 5 rows in preview
-        labeled_df, events_df = run_pipeline_from_df(df)
+    the function. You can easily change this if needed.
     """
 
     # ── Step 1: Open file browser dialog ─────────────────────────────────────
