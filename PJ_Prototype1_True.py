@@ -5,10 +5,9 @@ AIS Vessel Event Detection, Labeling & AI Summary System
 ================================================================================
 Project      : GEN AI DATA PROCESSING AND ANALYTICS SOLUTION
 Team         : DDT Team
-Version      : 2.0
+Version      : 3.0
 Description  : Full pipeline for reading, processing, detecting, labeling, and
                summarizing AIS vessel event data at scale (8M+ rows supported).
-
 
 DEPENDENCIES:
   pip install pandas anthropic pyais
@@ -332,7 +331,21 @@ def run_pipeline_from_df(df: pd.DataFrame,
     print_section("EXPORTING OUTPUTS")
     os.makedirs(output_dir, exist_ok=True)
 
-    file_prefix = date_label if date_label != "all" else "full_dataset"
+    if date_label != "all":
+        file_prefix = date_label
+    else:
+        # Derive actual date range from the data so each run gets a unique name
+        _dates = (
+            pd.to_datetime(df[cols["time"]], errors="coerce")
+            .dt.strftime("%Y-%m-%d").dropna().unique()
+        )
+        _dates = sorted(_dates)
+        if len(_dates) == 0:
+            file_prefix = "full_dataset"
+        elif len(_dates) == 1:
+            file_prefix = _dates[0]
+        else:
+            file_prefix = "{}_to_{}".format(_dates[0], _dates[-1])
 
     if output_format == "single":
         report = build_shipment_report(events_df, df, cols)
